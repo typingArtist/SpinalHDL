@@ -71,7 +71,7 @@ lazy val sim = (project in file("sim"))
     libraryDependencies += "commons-io" % "commons-io" % "2.4",
     libraryDependencies += "net.openhft" % "affinity" % "3.1.11",
     libraryDependencies += "org.slf4j" % "slf4j-simple" % "1.7.25",
-    libraryDependencies += "com.github.dblock" % "oshi-core" % "3.4.0",
+    libraryDependencies += "com.github.oshi" % "oshi-core" % "3.12.0",
     version := SpinalVersion.sim
   )
 
@@ -115,8 +115,9 @@ lazy val debugger = (project in file("debugger"))
     name := "SpinalHDL Debugger",
     version := SpinalVersion.debugger,
     resolvers += "sparetimelabs" at "http://www.sparetimelabs.com/maven2/",
+    resolvers += Resolver.jcenterRepo,
     //libraryDependencies += "org.scalafx" %% "scalafx" % "8.0.40-R8",
-    libraryDependencies += "com.github.purejavacomm" % "purejavacomm" % "1.0.2.RELEASE",
+    libraryDependencies += "org.jetbrains.pty4j" % "purejavacomm" % "0.0.11.1",
     libraryDependencies += "net.liftweb" %% "lift-json" % "3.1.0-M2",
     publishTo := None,
     publish := {},
@@ -143,7 +144,7 @@ lazy val tester = (project in file("tester"))
     version := SpinalVersion.tester,
     baseDirectory in (Test) := file("./"),
 
-      libraryDependencies += "org.scalatest" % "scalatest_2.11" % "2.2.1",
+      libraryDependencies += "org.scalatest" % "scalatest_2.11" % "3.2.0-SNAP10" % Test,
 //        libraryDependencies += "net.openhft" % "compiler" % "2.3.0",
     //libraryDependencies += "com.storm-enroute" %% "scalameter" % "latest.release",
     publishTo := None,
