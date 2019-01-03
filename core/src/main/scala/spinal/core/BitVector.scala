@@ -206,6 +206,19 @@ abstract class BitVector extends BaseType with Widthable {
     subdivideIn(this.getWidth / sliceWidth.value slices)
   }
 
+  /**
+    * Split the BitVector into two slices at position bitId
+    * * @example {{{ val (lowNibble, highNibble) = myByte.splitAt(4) }}}
+    * @param bitId the bit position at which the high part is cut off
+    * @return a tuple of (lowPart, highPart)
+    */
+  def splitAt(bitId: Int) : (T, T) = {
+    val splitPoint = bitId.max(range.low).min(range.high + 1)
+    val lo = this(range.low, (splitPoint - range.low) bits).asInstanceOf[T]
+    val hi = this(splitPoint, (range.high + 1 - splitPoint) bits).asInstanceOf[T]
+    (lo, hi)
+  }
+
   /** Extract a bit of the BitVector */
   def newExtract(bitId: Int, extract: BitVectorBitAccessFixed): Bool = {
     extract.source = this
