@@ -342,6 +342,54 @@ abstract class BitVector extends BaseType with Widthable {
     this := this.getZeroUnconstrained
     this
   }
+  
+  /** Set LSB bits to value */
+  def setLsbsTo(count: Int, value: Boolean) : this.type = {
+    this.apply(count-1 downto 0).setAllTo(value)
+    this
+  }
+
+  /** Set LSB bits to value */
+  def setLsbsTo(count: Int, value: Bool) : this.type = {
+    this.apply(count-1 downto 0).setAllTo(value)
+    this
+  }
+
+  /** Set LSB bits to value */
+  def setLsbsTo(count: UInt, value: Boolean) : this.type = {
+    for (i <- this.range) {
+      when(i < count) { this.apply(i) := Bool(value) }
+    }
+    this
+  }
+
+  /** Set LSB bits to value */
+  def setLsbsTo(count: UInt, value: Bool) : this.type = {
+    for (i <- this.range) {
+      when(i < count) { this.apply(i) := value }
+    }
+    this
+  }
+
+  /** Clear LSB bits */
+  def clearLsbs(count: Int) : this.type = {
+    setLsbsTo(count, False)
+  }
+
+  /** Clear LSB bits */
+  def clearLsbs(count: UInt) : this.type = {
+    setLsbsTo(count, False)
+  }
+
+  /** Set LSB bits */
+  def setLsbs(count: Int) : this.type = {
+    setLsbsTo(count, True)
+  }
+
+  /** Set LSB bits */
+  def setLsbs(count: UInt) : this.type = {
+    setLsbsTo(count, True)
+  }
 
   /** Return the width */
   def getWidthNoInferation: Int = if (inferredWidth != -1 ) inferredWidth else fixedWidth
