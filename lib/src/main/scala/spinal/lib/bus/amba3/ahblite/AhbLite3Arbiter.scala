@@ -83,7 +83,7 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
       when(input.HREADY){
         // we can simply catch the next entry from the input here, no further logic needed for data assignment
         data.assignFromBus(input)
-        valid := input.HSEL & input.HTRANS === 2
+        valid := input.HSEL & input.HTRANS(1)
       }
     }
 
