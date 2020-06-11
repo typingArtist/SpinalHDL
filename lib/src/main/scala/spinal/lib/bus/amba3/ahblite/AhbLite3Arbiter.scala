@@ -80,9 +80,10 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
 
 
     for((input, data, valid) <- (io.inputs, addressPhaseData, addressPhaseValid).zipped){
-      when(input.HSEL & input.HTRANS === 2 & input.HREADYOUT){
+      when(input.HREADY){
+        // we can simply catch the next entry from the input here, no further logic needed for data assignment
         data.assignFromBus(input)
-        valid := True
+        valid := input.HSEL & input.HTRANS === 2
       }
     }
 
