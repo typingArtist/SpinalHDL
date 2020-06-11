@@ -28,7 +28,9 @@ package spinal.lib.bus.amba3.ahblite
 import spinal.core._
 import spinal.lib._
 
+/* don’t publish this supplemental class  */
 case class AhbLite3AddrPhase(config: AhbLite3Config) extends Bundle{
+  val HSEL      = Bool
   val HADDR     = UInt(config.addressWidth bits)
   val HWRITE    = Bool
   val HSIZE     = Bits(3 bits)
@@ -38,6 +40,7 @@ case class AhbLite3AddrPhase(config: AhbLite3Config) extends Bundle{
   val HMASTLOCK = Bool
 
   def assignFromBus(bus: AhbLite3): Unit={
+    HSEL      := True
     HADDR     := bus.HADDR
     HWRITE    := bus.HWRITE
     HSIZE     := bus.HSIZE
@@ -45,7 +48,42 @@ case class AhbLite3AddrPhase(config: AhbLite3Config) extends Bundle{
     HPROT     := bus.HPROT
     HTRANS    := bus.HTRANS
     HMASTLOCK := bus.HMASTLOCK
-   }
+  }
+
+  def assignToBus(fromMaster: AhbLite3, toSlave: AhbLite3): Unit = {
+    when(HSEL) {
+      toSlave.HREADY     := True
+      toSlave.HSEL       := HSEL
+      toSlave.HADDR      := HADDR
+      toSlave.HWRITE     := HWRITE
+      toSlave.HSIZE      := HSIZE
+      toSlave.HBURST     := HBURST
+      toSlave.HPROT      := HPROT
+      toSlave.HTRANS     := HTRANS
+      toSlave.HMASTLOCK  := HMASTLOCK
+    } otherwise {
+      toSlave.HREADY     := fromMaster.HREADY
+      toSlave.HSEL       := fromMaster.HSEL
+      toSlave.HADDR      := fromMaster.HADDR
+      toSlave.HWRITE     := fromMaster.HWRITE
+      toSlave.HSIZE      := fromMaster.HSIZE
+      toSlave.HBURST     := fromMaster.HBURST
+      toSlave.HPROT      := fromMaster.HPROT
+      toSlave.HTRANS     := fromMaster.HTRANS
+      toSlave.HMASTLOCK  := fromMaster.HMASTLOCK
+    }
+  }
+}
+
+case class AhbLite3AddrPhaseFull(config: AhbLite3Config) extends AhbLite3AddrPhase(config) {
+  val HREADY    = Bool
+  val HSEL      = Bool
+
+  def assignFromBus(bus: AhbLite3): Unit = {
+    HREADY := bus.HREADY
+    HSEL   := bus.HSEL
+    super.assignFromBus(bus)
+  }
 }
 
 /**
@@ -67,6 +105,18 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
 
   }else new Area{
 
+    /** on an input, the following functionality is important:
+        * Accept and terminate IDLE requests. They should be terminated right on the input and
+          shouldn't hit the output. If the output is selected, the IDLE requests
+          of one of the inputs could hit the output, but there is little to no
+          benefit in doing that instead of terminating all these requests on the
+          input.
+        * Accept NONSEQ requests (HREADY & HSEL & HTRANS == AhbLite3.NONSEQ). If
+          the port is selected, forward the request. If either HMASTLOCK is asserted
+          or it is to
+          and
+     */
+
     val dataPhaseActive = RegNextWhen(io.output.HTRANS(1), io.output.HREADY) init(False)
     val locked          = RegInit(False)
     val maskProposal    = Bits(inputsCount bits)
@@ -75,18 +125,58 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
     val requestIndex    = OHToUInt(maskRouted)
 
     /** Backup address phase */
+    val addressPhasesStore = Vec(Reg(AhbLite3AddrPhase(ahbLite3Config)), inputsCount)
+
+    val addressPhasesStore = io.inputs.map { input =>
+      val store = Reg(Ahblite3AddrPhase(ahbLite3Config))
+      store.HREADY.init(False)
+
+      when(input.HREADY) {
+        store.assignFromBus(input)
+        when(input.HSEL & (input.HTRANS === Ahblite3.NONSEQ || input.HTRANS === AhbLite3.SEQ)) {
+
+        }
+      }
+
+      store
+    }
+
+    val (addressPhasesStore, addressPhasesMuxed) = io.inputs.map { input =>
+      val inputAddrData = AhbLite3AddrPhase(ahbLite3Config)
+      inputAddrData.assignFromBus(input)
+      inputAddrData.HREADY := input.HREADY
+
+      val store = Reg(Ahblite3AddrPhase(ahbLite3Config))
+      store.HREADY.init(False)
+      val muxed = mux(store.HREADY, store, Ahblite3AddrPhase(ahbLite3Config).assignFromBus(input))
+      val muxed = Ahblite3AddrPhase(ahbLite3Config)
+
+      when(input.HREADY) {
+        store.assignFromBus(input)
+        when(input.HSEL & (input.HTRANS === Ahblite3.NONSEQ || input.HTRANS === AhbLite3.SEQ)) {
+
+        }
+      }
+
+
+      (store, muxed)
+    }
+
+    val addressPhasesMuxed = Vec(AhbLite3AddrPhase(ahbLite3Config)), inputsCount)
     val addressPhaseData  = Vec(Reg(AhbLite3AddrPhase(ahbLite3Config)), io.inputs.length)
     val addressPhaseValid = Vec(RegInit(False), io.inputs.length)
 
+    //
     for((input, index) <- io.inputs.zipWithIndex){
-      when(input.HSEL & input.HTRANS === 2 & input.HREADYOUT){
+      when(input.HREADY){
+        when(input.HTRANS === AhbLite3.IDLE || input.HTRANS === AhbLite3.BUSY) {
+          // just terminate early.
+          input.
+        }
         addressPhaseData(index).assignFromBus(io.inputs(index))
-        addressPhaseValid(index) := True
+        addressPhaseValid(index) := input.HSEL & (input.HTRANS === AhbLite3.NONSEQ || input.HTRANS === AhbLite3.SEQ)
       }
     }
-
-    val transactionOnHold = addressPhaseValid.reduce(_ || _)
-
 
     when(io.output.HSEL & io.output.HTRANS(1)) { // valid transaction
       maskLocked := maskRouted
@@ -99,6 +189,7 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
     }
 
     /** Arbiter logic */
+    val transactionOnHold = addressPhaseValid.reduce(_ || _)
     val requests = Mux(transactionOnHold, addressPhaseValid.asBits, io.inputs.map(bus => bus.HSEL & bus.HTRANS(1)).asBits)
 
     if(roundRobinArbiter) {
@@ -110,9 +201,9 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
     /** Multiplexer */
     val bufferAddrEnable = addressPhaseValid(requestIndex)
 
-    io.output.HSEL      := !io.output.isIdle ? (addressPhaseValid(requestIndex) || io.inputs(requestIndex).HSEL) | False
+    io.output.HSEL      := bufferAddrEnable  ? True                                     | io.inputs(requestIndex).HSEL
     io.output.HADDR     := bufferAddrEnable  ? addressPhaseData(requestIndex).HADDR     | io.inputs(requestIndex).HADDR
-    io.output.HREADY    := bufferAddrEnable  ? True | io.inputs(requestIndex).HREADY
+    io.output.HREADY    := bufferAddrEnable  ? True                                     | io.inputs(requestIndex).HREADY
     io.output.HWRITE    := bufferAddrEnable  ? addressPhaseData(requestIndex).HWRITE    | io.inputs(requestIndex).HWRITE
     io.output.HSIZE     := bufferAddrEnable  ? addressPhaseData(requestIndex).HSIZE     | io.inputs(requestIndex).HSIZE
     io.output.HBURST    := bufferAddrEnable  ? addressPhaseData(requestIndex).HBURST    | io.inputs(requestIndex).HBURST
