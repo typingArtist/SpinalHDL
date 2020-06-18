@@ -67,15 +67,19 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
 
   }else new Area{
 
-    val dataPhaseActive = RegNextWhen(io.output.HTRANS(1), io.output.HREADY) init(False)
-    val locked          = RegInit(False)
+    //val dataPhaseActive = RegNextWhen(io.output.HTRANS(1), io.output.HREADY) init(False)
+    //val locked          = RegInit(False)
+    /** maskProposal: all inputs which have either pending or actual SEQ/NONSEQ request */
     val maskProposal    = Bits(inputsCount bits)
-    val maskLocked      = Reg(Bits(inputsCount bits)) init(BigInt(1) << (inputsCount - 1))
-    val maskRouted      = Mux(locked || dataPhaseActive, maskLocked, maskProposal)
+    val maskAccess      = Bits(inputsCount bits)
+    val maskData        = Reg(Bits(inputsCount bits)) init(0)
+    //val maskLocked      = Reg(Bits(inputsCount bits)) init(BigInt(1) << (inputsCount - 1))
+    val maskRouted      = maskProposal // Mux(locked || dataPhaseActive, maskLocked, maskProposal)
     val requestIndex    = OHToUInt(maskRouted)
 
     /** Backup address phase */
     val addressPhaseData  = Vec(Reg(AhbLite3AddrPhase(ahbLite3Config)), inputsCount)
+    /** valid only if addressPhaseData stores a request */
     val addressPhaseValid = Vec(RegInit(False), inputsCount)
 
 
@@ -83,7 +87,7 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
       when(input.HREADY){
         // we can simply catch the next entry from the input here, no further logic needed for data assignment
         data.assignFromBus(input)
-        valid := input.HSEL & input.HTRANS(1)
+        valid := input.HSEL & input.HTRANS(1) // note: if the request is taken volley to the output, valid needs to be overwritten as False before stored into the register
       }
     }
 
@@ -112,9 +116,12 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
     /** Multiplexer */
     val bufferAddrEnable = addressPhaseValid(requestIndex)
 
-    io.output.HSEL      := !io.output.isIdle ? (addressPhaseValid(requestIndex) || io.inputs(requestIndex).HSEL) | False
+    io.output.HSEL      := !io.output.isIdle ? bufferAddrEnable || io.inputs(requestIndex).HSEL) | False
+
+    io.output.HSEL := bufferAddrEnable || io.inputs(requestIndex).HSEL
+
     io.output.HADDR     := bufferAddrEnable  ? addressPhaseData(requestIndex).HADDR     | io.inputs(requestIndex).HADDR
-    io.output.HREADY    := bufferAddrEnable  ? True | io.inputs(requestIndex).HREADY
+    io.output.HREADY    := bufferAddrEnable  ? True                                     | io.inputs(requestIndex).HREADY
     io.output.HWRITE    := bufferAddrEnable  ? addressPhaseData(requestIndex).HWRITE    | io.inputs(requestIndex).HWRITE
     io.output.HSIZE     := bufferAddrEnable  ? addressPhaseData(requestIndex).HSIZE     | io.inputs(requestIndex).HSIZE
     io.output.HBURST    := bufferAddrEnable  ? addressPhaseData(requestIndex).HBURST    | io.inputs(requestIndex).HBURST
