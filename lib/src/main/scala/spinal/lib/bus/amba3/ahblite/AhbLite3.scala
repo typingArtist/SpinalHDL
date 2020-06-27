@@ -156,12 +156,12 @@ case class AhbLite3(config: AhbLite3Config) extends Bundle with IMasterSlave {
 
   def writeMask(): Bits = {
     val lowMask, highMask = Bits(config.bytePerWord bits)
-    val low  =  HADDR(config.symboleRange)
-    val high = HADDR(config.symboleRange) + Vec((0 to config.bytePerWord).map(idx => idx === HSIZE)).asBits.asUInt
+    val low  = HADDR(config.symboleRange)
+    val high = HADDR(config.symboleRange) + Vec((0 to log2Up(config.bytePerWord) - 1).map(idx => idx === HSIZE)).asBits.asUInt
 
     for(idx <- lowMask.range){
       lowMask(idx)  := (if(idx != low.maxValue) low <= idx else True)
-      highMask(idx) := high > idx
+      highMask(idx) := (if(high =!= 0) high > idx else True)
     }
 
     lowMask & highMask
