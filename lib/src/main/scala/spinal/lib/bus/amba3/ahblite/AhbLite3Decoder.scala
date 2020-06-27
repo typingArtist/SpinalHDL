@@ -116,61 +116,33 @@ class AhbLite3Decoder(ahbLite3Config: AhbLite3Config, decodings: Seq[SizeMapping
     val defaultSlave = if(addDefaultSlaveInterface) master(AhbLite3(ahbLite3Config)).setPartialName("defaultSlave") else null
   }
 
-
   val defaultSlave = if(addDefaultSlaveInterface) null else new DefaultAhbLite3Slave(ahbLite3Config)
 
   // add the default slave to the output list
   def outputs : List[AhbLite3] = io.outputs.toList ++ List(if(addDefaultSlaveInterface) io.defaultSlave else defaultSlave.io)
 
-  val isIdle  = io.input.isIdle
-  val wasIdle = RegNextWhen(isIdle, io.input.HREADY) init(True)
-
-  val slaveReadyOutReduction = outputs.map(_.HREADYOUT).reduce(_ & _)
-
-  val decodesSlaves       = decodings.map(_.hit(io.input.HADDR) && !isIdle && io.input.HSEL).asBits
-  val decodeDefaultSlave  = decodesSlaves === 0 & !isIdle && io.input.HSEL
+  val decodesSlaves       = decodings.map(_.hit(io.input.HADDR)).asBits
+  val decodeDefaultSlave  = decodesSlaves === 0
 
   val decodedSels  = decodeDefaultSlave ## decodesSlaves // !! reverse order compare to def outputs
-  val applyedSels  = Bits(decodings.size + 1 bits)
-  val previousSels = Reg(Bits(decodings.size + 1 bits)) init(0)
 
-
-  val noneIdleSwitchDetected = previousSels =/= 0 && decodedSels =/= 0 && previousSels =/= decodedSels
-  applyedSels      := !noneIdleSwitchDetected ? decodedSels     | 0
-  val applyedHTRANS = !noneIdleSwitchDetected ? io.input.HTRANS | 0
-  val applyedSlaveHREADY = noneIdleSwitchDetected ? slaveReadyOutReduction | io.input.HREADY
-
-  when(applyedSlaveHREADY) {
-    previousSels := applyedSels
-  }
-
-  for((output, sel) <- (outputs, applyedSels.asBools).zipped){
-    output.HREADY    := applyedSlaveHREADY
-    output.HSEL      := sel
+  for((output, sel) <- (outputs, decodedSels.asBools).zipped){
+    output.HREADY    := io.input.HREADY
+    output.HSEL      := sel & io.input.HSEL
     output.HADDR     := io.input.HADDR
     output.HWRITE    := io.input.HWRITE
     output.HSIZE     := io.input.HSIZE
     output.HBURST    := io.input.HBURST
     output.HPROT     := io.input.HPROT
-    output.HTRANS    := applyedHTRANS
+    output.HTRANS    := io.input.HTRANS
     output.HMASTLOCK := io.input.HMASTLOCK
     output.HWDATA    := io.input.HWDATA
   }
 
   val requestIndex = OHToUInt(outputs.map(_.HSEL))
-  val dataIndex    = RegNextWhen(requestIndex, io.input.HREADYOUT)
-  val slaveHRDATA  = outputs(dataIndex).HRDATA
-  val slaveHRESP   = outputs(dataIndex).HRESP
+  val dataIndex    = RegNextWhen(requestIndex, io.input.HREADY)
 
-  val switchBufferValid  = RegNextWhen(noneIdleSwitchDetected, applyedSlaveHREADY) init(False)
-  val switchBufferHRDATA = RegNextWhen(slaveHRDATA, applyedSlaveHREADY)
-  val switchBufferHRESP  = RegNextWhen(slaveHRESP, applyedSlaveHREADY)
-
-  io.input.HRDATA    := switchBufferValid ? switchBufferHRDATA | slaveHRDATA
-  io.input.HRESP     := switchBufferValid ? switchBufferHRESP  | slaveHRESP
-  io.input.HREADYOUT := slaveReadyOutReduction && !noneIdleSwitchDetected
-
-  when(wasIdle){
-    io.input.HRESP := False
-  }
+  val io.input.HRDATA    = outputs(dataIndex).HRDATA
+  val io.input.HRESP     = outputs(dataIndex).HRESP
+  val io.input.HREADYOUT = outputs(dataIndex).HREADYOUT
 }
