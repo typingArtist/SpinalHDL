@@ -38,39 +38,14 @@ class DefaultAhbLite3Slave(config: AhbLite3Config) extends Component{
 
   val io = slave(AhbLite3(config))
 
-  object Phase extends SpinalEnum{
-    val IDLE, ACCESS, RESPONSE, ERROR = newElement()
-  }
-
-  import Phase._
-
-  val state = RegInit(IDLE)
-
-  io.HREADYOUT := True
-  io.HRESP     := False
+  io.HREADYOUT := RegNext(True) init(True)
+  io.HRESP     := RegNext(!io.HREADYOUT) init(False)
   io.HRDATA    := 0
 
-  switch(state){
-    is(IDLE){
-      when(io.HSEL & !io.isIdle){
-        state := ACCESS
-      }
-    }
-    is(ACCESS){
-      io.HREADYOUT := False
-      state        := RESPONSE
-    }
-    is(RESPONSE){
-      io.HREADYOUT := False
-      io.HRESP     := True
-      state        := ERROR
-    }
-    default{
-      io.HRESP := True
-      state    := IDLE
-    }
+  when(io.HREADY & io.HSEL) {
+    io.HREADYOUT := io.isIdle
+    io.HRESP     := !io.isIdle
   }
-
 }
 
 
