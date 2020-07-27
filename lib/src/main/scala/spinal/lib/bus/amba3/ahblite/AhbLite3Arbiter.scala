@@ -48,6 +48,148 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
 
   }else new Area{
 
+    /** AddressPhase
+        Each input port owns a request buffer because the arbiter cannot deny a
+        request from any port if it is busy handling traffic from another input.
+        The request buffer accepts a request as if it was a slave, but delays the
+        assertion of HREADYOUT until the arbitration has turned to that port, when
+        the request can be finally terminated by the slave.
+    */
+
+    case class AddressPhase(withHREADY: Boolean) extends Bundle {
+      val HREADY    = withHREADY generate Bool
+      val HSEL      = Bool
+      val HADDR     = UInt(ahbLite3Config.addressWidth bits)
+      val HWRITE    = Bool
+      val HSIZE     = Bits(3 bits)
+      val HBURST    = Bits(3 bits)
+      val HPROT     = Bits(4 bits)
+      val HTRANS    = Bits(2 bits)
+      val HMASTLOCK = Bool
+    }
+
+    val inputStages = io.inputs.map(input => new Area {
+      // import: driven from outside of this area
+      //   chosen: True during the address phase, at least in the last cycle of it
+      val chosen = False
+
+      val buffer = Reg(AddressPhase(withHREADY = false))
+      buffer.HSEL.init(False)
+
+      /** clear HSEL if this port is selected by the end of the address phase.
+          This appears in any of these cases:
+      1. there is a stored request in the buffer, so buffer.HSEL goes
+         from True to False
+      2. there is no stored request, so the request is accepted volley from
+         the input. We keep buffer.HSEL at False
+      3. there is no stored request and not even a non-IDLE request on any input, but
+         this stage is selected, so keep buffer.HSEL at False
+      */
+      buffer.HSEL.clearWhen(chosen & io.output.HREADY)
+
+      when(input.HREADY) {
+        /** we don't store IDLE or BUSY. This is to avoid protocol errors at the
+            beginning of a burst or HMASTLOCK sequence where arbitration might
+            not succeed in the first cycle, which would lead to illegal non-zero
+            wait state responses. Successive BUSY burst and IDLE HMASTLOCK transfers will
+            stay together and will be forwarded to the slave */
+        buffer.HSEL      := input.HSEL && (input.HTRANS =/= AhbLite3.IDLE) && (input.HTRANS =/= AhbLite3.BUSY)
+        buffer.HADDR     := input.HADDR
+        buffer.HWRITE    := input.HWRITE
+        buffer.HSIZE     := input.HSIZE
+        buffer.HBURST    := input.HBURST
+        buffer.HPROT     := input.HPROT
+        buffer.HTRANS    := input.HTRANS
+        buffer.HMASTLOCK := input.HMASTLOCK
+      }
+
+
+      // export: used outside of this area
+      val addressPhase = AddressPhase(withHREADY = true)
+      val unInterruptible = addressPhase.HSEL && ((addressPhase.HTRANS === AhbLite3.SEQ) || (addressPhase.HTRANS === AhbLite3.BUSY) || addressPhase.HMASTLOCK)
+      val requestTransfer = addressPhase.HREADY && addressPhase.HSEL && ((addressPhase.HTRANS === AhbLite3.NONSEQ) || unInterruptible)
+      val dataPhaseActive = RegInit(False)
+
+      dataPhaseActive.clearWhen(io.output.HREADYOUT).setWhen(chosen && addressPhase.HREADY && addressPhase.HSEL)
+
+      addressPhase.HREADY    := Mux(buffer.HSEL, True,             input.HREADY)
+      addressPhase.HSEL      := Mux(buffer.HSEL, True,             input.HSEL)
+      addressPhase.HADDR     := Mux(buffer.HSEL, buffer.HADDR,     input.HADDR)
+      addressPhase.HWRITE    := Mux(buffer.HSEL, buffer.HWRITE,    input.HWRITE)
+      addressPhase.HSIZE     := Mux(buffer.HSEL, buffer.HSIZE,     input.HSIZE)
+      addressPhase.HBURST    := Mux(buffer.HSEL, buffer.HBURST,    input.HBURST)
+      addressPhase.HPROT     := Mux(buffer.HSEL, buffer.HPROT,     input.HPROT)
+      addressPhase.HTRANS    := Mux(buffer.HSEL, buffer.HTRANS,    input.HTRANS)
+      addressPhase.HMASTLOCK := Mux(buffer.HSEL, buffer.HMASTLOCK, input.HMASTLOCK)
+
+      // data return path
+      input.HRDATA    := io.output.HRDATA
+      input.HRESP     := Mux(dataPhaseActive, io.output.HRESP,     False)
+      input.HREADYOUT := Mux(dataPhaseActive, io.output.HREADYOUT, !buffer.HSEL)
+    })
+
+    val dataPhasePortMap = inputStages.map(_.dataPhaseActive)
+    val dataPhaseIndex = OHToUInt(dataPhasePortMap)
+    val dataPhaseValid = dataPhasePortMap.asBits.asUInt =/= 0
+
+
+
+    // priority for uninterruptible requests
+    val selectNewPort = False
+    val dataPhaseUnInterruptible = Vec(inputStages.map(_.unInterruptible))(dataPhaseIndex)
+    when(!dataPhaseValid) {
+      selectNewPort := True
+    } elsewhen(dataPhaseUnInterruptible) {
+      selectNewPort := False
+    } elsewhen(io.output.HREADYOUT) {
+      selectNewPort := True
+    }
+    // val selectNewPort = !dataPhaseValid || (io.output.HREADYOUT && !dataPhaseUnInterruptible)
+    val requestIndex = dataPhaseIndex
+
+    when(selectNewPort){
+      // the actual arbiter
+      val requests = inputStages.map(_.requestTransfer).asBits
+      if(roundRobinArbiter)
+        maskProposal := OHMasking.roundRobin(requests, maskLocked(maskLocked.high - 1 downto 0) ## maskLocked.msb)
+      else
+        maskProposal := OHMasking.first(requests)
+
+      // address forward path
+      val requestIndex     = OHToUInt(maskRouted)
+    }
+
+    val chosen = Vec(inputStages.map(_.chosen))(requestIndex)
+    chosen := True
+
+    // address path
+    val addressPhase = Vec(inputStages.map(_.addressPhase))(requestIndex)
+    io.output.HSEL      := addressPhase.HSEL
+    io.output.HREADY    := addressPhase.HREADY
+    io.output.HADDR     := addressPhase.HADDR
+    io.output.HWRITE    := addressPhase.HWRITE
+    io.output.HSIZE     := addressPhase.HSIZE
+    io.output.HBURST    := addressPhase.HBURST
+    io.output.HPROT     := addressPhase.HPROT
+    io.output.HTRANS    := addressPhase.HTRANS
+    io.output.HMASTLOCK := addressPhase.HMASTLOCK
+
+    // data forward path
+    io.output.HWDATA    := MuxOH(dataPhasePortMap, io.inputs.map(_.HWDATA))
+
+    def myRoundRobin(requests: Bits, lastMask : Bits) = {
+      val ret = Bits(requests.getLength bits)
+      val doubleRequests = requests ## requests
+      val masking = Bits(2*requests.getLength bits)
+
+      OHMasking.first()
+    }
+
+    when(!dataPhaseValid || io.output.HREADYOUT) {
+      dataPhaseIndex := requestIndex
+      dataPhaseValid := io.output.HSEL && io.output.HREADY
+    }
+
     val dataPhaseActive = RegNextWhen(io.output.HTRANS(1), io.output.HREADY) init(False)
     val locked          = RegInit(False)
     val maskProposal    = Bits(inputsCount bits)
@@ -65,12 +207,14 @@ case class AhbLite3Arbiter(ahbLite3Config: AhbLite3Config, inputsCount: Int, rou
       }
     }
 
+    // the actual arbiter
     val requests = io.inputs.map(_.HSEL).asBits
     if(roundRobinArbiter)
       maskProposal := OHMasking.roundRobin(requests, maskLocked(maskLocked.high - 1 downto 0) ## maskLocked.msb)
     else
       maskProposal := OHMasking.first(requests)
 
+    // address forward path
     val requestIndex     = OHToUInt(maskRouted)
     io.output.HSEL      := (io.inputs, maskRouted.asBools).zipped.map(_.HSEL & _).reduce(_ | _)
     io.output.HADDR     := io.inputs(requestIndex).HADDR

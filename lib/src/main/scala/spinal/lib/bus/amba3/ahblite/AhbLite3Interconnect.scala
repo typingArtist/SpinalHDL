@@ -54,15 +54,15 @@ case class AhbLite3CrossbarSlaveConfig(mapping: SizeMapping, index: Int){
   *
   *         val crossbar = AhbLite3CrossbarFactory(ahbConfig)
   *             .addSlaves(
-  *                 io.ahbSlaves(0) -> (0x1000,0x1000),
-  *                 io.ahbSlaves(1) -> (0x3000,0x1000),
-  *                 io.ahbSlaves(2) -> (0x4000,0x1000),
-  *                 io.ahbSlaves(3) -> (0x5000,0x1000)
+  *                 io.ahbSlaves(0) -> (0x1000, 8 KiB),
+  *                 io.ahbSlaves(1) -> (0x3000, 4 KiB),
+  *                 io.ahbSlaves(2) -> (0x4000, 4 KiB),
+  *                 io.ahbSlaves(3) -> (0x5000, 4 KiB)
   *              )
   *              .addConnections(
-  *                 io.ahbMasters(0).toAhbLite3() -> List(ahbSlaves(0), ahbSlaves(1)),
-  *                 io.ahbMasters(1).toAhbLite3() -> List(ahbSlaves(1), ahbSlaves(2), ahbSlaves(3)),
-  *                 io.ahbMasters(2).toAhbLite3() -> List(ahbSlaves(0), ahbSlaves(3))
+  *                 io.ahbMasters(0).toAhbLite3() -> List(io.ahbSlaves(0), io.ahbSlaves(1)),
+  *                 io.ahbMasters(1).toAhbLite3() -> List(io.ahbSlaves(1), io.ahbSlaves(2), io.ahbSlaves(3)),
+  *                 io.ahbMasters(2).toAhbLite3() -> List(io.ahbSlaves(0), io.ahbSlaves(3))
   *              )
   *              // ** OPTIONAL **
   *              //.addGlobalDefaultSlave(io.defaultSalve)
@@ -175,5 +175,3 @@ case class AhbLite3CrossbarFactory(ahbLite3Config: AhbLite3Config){
     }
   }
 }
-
-
